@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Reading the City</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width">
+        <link rel="stylesheet" href="css/normalize.css" type="text/css" media="screen"/>
+        <link rel="stylesheet" href="css/style.css" type="text/css" media="screen"/>
+        <link rel="stylesheet" href="css/slider.css">
+        <script src="http://code.jquery.com/jquery-1.9.1.js"></script>
+        <script src="http://code.jquery.com/ui/1.10.4/jquery-ui.js"></script>
+        <script src="js/checkbox.js"></script>
+        <style>
+             .hide { color:gray }
+        </style>
+        <script>
+            $(function(){
+                $(".checkbox").each(function(){
+                    $(this).change(function(){
+                        //console.log("Check val: "+$(this).is(':checked'));
+                        var beacon = $(this).parent().parent().find(".FloatLeft > span").first();
+                        $(this).parent().parent().toggleClass("hide");
+                        if ( $(this).parent().parent().hasClass("hide") ) {
+                            $.post("/app", {signal: ui.value, beacon: beacon.attr('id'), hidden: 1}, function(data){
+                                // Anything to do here?  Probably not.
+                            });
+                            $(beacon).slider("disable");
+                        } else {
+                            $(beacon).slider("enable");
+                        }
+                    });
+                });
+                $(".Slider > .FloatLeft > span").each(function(){
+                    var beacon = $(this);
+                    //console.log("Setting up slider " + beacon.attr('id'));
+                    var value = parseInt( $( this ).text(), 10 );
+                    $(this).empty().slider({
+                        value: value,
+                        range: "min",
+                        animate: true,
+                        orientation: "vertical",
+                        stop: function (e, ui) {
+                            if ( $(beacon).parent().parent().find("input[type=checkbox]").first().is(':checked') == false ) {
+                                $.post("/app", {signal: ui.value, beacon: beacon.attr('id'), hidden: 0}, function(data){
+                                    //console.log(data);
+                                    //$("#console").append("<p>> <a href='" + data.url.default + "'>" + data.name + " - " + data.proximity + "</a></p>");
+                                    $(beacon).parent().parent().find("span.name").first().html(data.label + " : " + data.name);
+                                    $(beacon).parent().parent().find("span.major").first().html(data.major);
+                                    $(beacon).parent().parent().find("span.minor").first().html(data.minor);
+                                    $(beacon).parent().parent().find("span.signal").first().html(data.signal);
+                                    if ( !!data.url )
+                                    $(beacon).parent().parent().find("span.url").first().html("<a href='" + data.url.default + "'>"+ data.url.default + "</a>");
+                                    else
+                                    $(beacon).parent().parent().find("span.url").first().html("");
+                                    $(beacon).parent().parent().find("span.status").first().html(data.status);
+                                    $(beacon).parent().parent().find("span.proximity").first().html(data.proximity);
+                                    $(beacon).parent().parent().find("span.hidden").first().html(data.hidden);
+                                });
+                            }
+                        }
+                    });
+                });
+            });
+        </script>
+    </head>
+    <body>
+        <div id="Wrapper">
+            <div id="Header">
+                <div id="Account">
+                    <h2><span></span></h2>
+                </div>
+            </div><!-- End Header -->
+            <!--<div id="Output">
+                <div id="logo">
+                    <img src="img/logo.png" class="resize" alt="Logo Goes Here."/>
+                </div>
+                <div id="ConsoleWrapper">
+                    <h1>Console Output:</h1>
+                    <div id="console"><p>&#62;&nbsp;Major:<span class="console.major"></span>&nbsp;Minor:<span class="console.minor"></span>&nbsp;&#45;&nbsp;Signal Strength:<span class="console.signal"></span>
+                    </div>
+                </div>
+                <div id="clear"></div>
+            </div> -->
+            <a href="<%= url_for 'help' %>">Help</a>
+            <div id="Input">
+                <div class="Slider"><!-- Start Slider 1 -->
+                     <div class="FloatLeft">
+                        <span id="b9407f30-f5f8-466e-aff9-25556b57fe6d-30024-36068">65</span>
+                     </div>
+                     <div class="FloatRight">
+                         <p><span class="name"></span></p>
+                         <p>Major ID: <span class="major"></span><br/>Minor ID: <span class="minor"></span></p>
+                         <p>Signal Strength: <span class="signal"></span> db</p>
+                         <p>Link: <span class="url"></span></p>
+                         <p>Status: <span class="status"></span><br/>Proximity: <span class="proximity"></span><br/>Hidden: <span class="hidden"></span></p>
+                         <div class="checkbox"><input type="checkbox" value="0"></div>
+                     </div>
+                </div><!-- End Slider 1 -->
+                <div class="Slider"><!-- Start Slider 2 -->
+                     <div class="FloatLeft">
+                        <span id="b9407f30-f5f8-466e-aff9-25556b57fe6d-1222-4245">90</span>
+                     </div>
+                     <div class="FloatRight">
+                         <p><span class="name"></span></p>
+                         <p>Major ID: <span class="major"></span><br/>Minor ID: <span class="minor"></span></p>
+                         <p>Signal Strength: <span class="signal"></span> db</p>
+                         <p>Link: <span class="url"></span></p>
+                         <p>Status: <span class="status"></span><br/>Proximity: <span class="proximity"></span><br/>Hidden: <span class="hidden"></span></p>
+                         <div class="checkbox"><input type="checkbox" value="0"></div>
+                     </div>
+                </div><!-- End Slider 2 -->
+                <div class="Slider"><!-- Start Slider 3 -->
+                     <div class="FloatLeft">
+                         <span id="b9407f30-f5f8-466e-aff9-25556b57fe6d-1352-0003">0</span>
+                     </div>
+                     <div class="FloatRight">
+                         <p><span class="name"></span></p>
+                         <p>Major ID: <span class="major"></span><br/>Minor ID: <span class="minor"></span></p>
+                         <p>Signal Strength: <span class="signal"></span> db</p>
+                         <p>Link: <span class="url"></span></p>
+                         <p>Status: <span class="status"></span><br/>Proximity: <span class="proximity"></span><br/>Hidden: <span class="hidden"></span></p>
+                         <div class="checkbox"><input type="checkbox" value="0"></div>
+                     </div>
+                </div><!-- End Slider 3 -->
+                <div class="Slider"><!-- Start Slider 4 -->
+                     <div class="FloatLeft">
+                         <span id="b9407f30-f5f8-466e-aff9-25556b57fe6d-2452-0012">22</span>
+                     </div>
+                     <div class="FloatRight">
+                         <p><span class="name"></span></p>
+                         <p>Major ID: <span class="major"></span><br/>Minor ID: <span class="minor"></span></p>
+                         <p>Signal Strength: <span class="signal"></span> db</p>
+                         <p>Link: <span class="url"></span></p>
+                         <p>Status: <span class="status"></span><br/>Proximity: <span class="proximity"></span><br/>Hidden: <span class="hidden"></span></p>
+                         <div class="checkbox"><input type="checkbox" value="0"></div>
+                     </div>
+                </div><!-- End Slider 4 -->
+            </div><!-- End Input -->
+        </div><!-- End Wrapper -->
+    </body>
+</html>
