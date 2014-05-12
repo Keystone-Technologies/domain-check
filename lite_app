@@ -1,6 +1,141 @@
 use Mojolicious::Lite;
 
+use Net::Whois::Parser;
+use Net::SSL::ExpireDate;
+use DateTime::Format::Flexible;
+use AnyEvent::DNS;
+use Data::Validate::IP;
+use Nmap::Parser;
 
-get '/' => 'index';
+my $validator=Data::Validate::IP->new;
+my $np = new Nmap::Parser;
+#$np->parsescan('/usr/bin/nmap','-sV -p-',$ARGV[0]);
+$np->parsefile('nmap.xml');
+for my $host ( $np->all_hosts ) {
+  my $hostname = $host->hostname || $host->addr;
+  say $hostname;
+  # DNS
+  0 and lookup($hostname);
+  # Domain expiration
+  if ( 0 && $host->hostname ) {
+    if ( my $info = parse_whois(domain => $host->hostname) ) {
+      my $expires = DateTime::Format::Flexible->parse_datetime($info->{expiration_date});
+      my $now = DateTime::Format::Flexible->parse_datetime('now');
+      my $remaining = $now - $expires;
+      printf "Domain Expires: %s%s\n", $expires->ymd, ($remaining->years + $remaining->months/12 < 3 ? " (< 3 months)" : '');
+      #warn Data::Dumper::Dumper($info);
+    }
+  }
+  # SSL expiration
+  foreach my $port ( $host->tcp_ports('open') ) {
+    my $svc = $host->tcp_service($port);
+    next unless $svc->name eq 'http';
+    my $ed;
+    eval { $ed = Net::SSL::ExpireDate->new(https => "$hostname:$port") };
+    if ( $@ ) {
+      #warn $@;
+    } elsif ( defined $ed ) {
+      my $warning;
+      local $SIG{__WARN__} = sub{ $warning = $_[0] };
+      eval { $ed->expire_date; };
+      local $SIG{__WARN__} = undef;
+      if ( $warning ) {
+         printf "No SSL on http port %s\n", $port;
+      } else {
+        if (defined $ed->expire_date) {
+          printf "SSL on http port %s Expires: %s%s\n", $port, $ed->expire_date->ymd, ($ed->is_expired('3 months') ? " (< 3 months)" : '');
+          #C=US, postalCode=63090, ST=MO, L=Washington, street=1000 Borgia Drive, O=St. Francis Borgia RHS, OU=Comodo InstantSSL, CN=www.borgia.com at lite_app line 47.
+          foreach ( @{$ed->x509->subject_name->entries} ) {
+            warn $_->type, $_->value;
+          }
+          warn $ed->x509->extensions_by_oid->{'2.5.29.17'}->value;
+        }
+      }
+    }
+  }
+  # Need to also store in database manual records: registrar + u/p, extra
+  # name records, ssl supplier + u/p
+} continue { print "\n" }
 
-app->start;
+sub lookup {
+  my %lookup;
+  if ( $validator->is_ipv4($_[0]) ) {
+    my $ip = shift;
+    my $cv1 = AnyEvent->condvar;
+    AnyEvent::DNS::reverse_verify $ip, $cv1;
+    if ( my $host = $cv1->recv ) {
+      $lookup{$ip} = $host;
+      #warn Data::Dumper::Dumper {$ip => $host};
+      return "$ip resolves to $host and $host resolves to $ip";
+    } else {
+      my $cv2 = AnyEvent->condvar;
+      AnyEvent::DNS::reverse_lookup $ip, $cv2;
+      if ( my $host = $cv2->recv ) {
+        my $cv3 = AnyEvent->condvar;
+        AnyEvent::DNS::a $host, $cv3;
+        my $host1 = $cv3->recv;
+        $lookup{$ip} = $host;
+        $lookup{$host} = $host1;
+        #warn Data::Dumper::Dumper [ {$ip => $host}, {$host => $host1} ];
+        return "$ip resolves to $host but $host resolves to $host1";
+      } else {
+        $lookup{$ip} = '';
+        #warn "???\n";
+        return "$ip couldn't resolve";
+      }
+    }
+  } else {
+    my $h = shift;
+    my $cv = AnyEvent->condvar;
+    AnyEvent::DNS::a $h, $cv;
+    my $ip = $cv->recv;
+    $lookup{$h} = $ip;
+    #warn Data::Dumper::Dumper {$h => $ip};
+    #say "$h resolves to $ip";
+    my $cv1 = AnyEvent->condvar;
+    AnyEvent::DNS::reverse_verify $ip, $cv1;
+    if ( my $host = $cv1->recv ) {
+      $lookup{$ip} = $host;
+      #warn Data::Dumper::Dumper {$ip => $host};
+      if ( $h eq $host ) {
+        return "$h resolves to $ip and $ip resolves to $host and $host resolves to $ip";
+      } else {
+        return "$h resolves to $ip but $ip resolves to $host while $host resolves to $ip";
+      }
+    } else {
+      my $cv2 = AnyEvent->condvar;
+      AnyEvent::DNS::reverse_lookup $ip, $cv2;
+      if ( my $host = $cv2->recv ) {
+        my $cv3 = AnyEvent->condvar;
+        AnyEvent::DNS::a $host, $cv3;
+        my $host1 = $cv3->recv;
+        $lookup{$ip} = $host;
+        $lookup{$host} = $host1;
+        #warn Data::Dumper::Dumper [ {$ip => $host}, {$host => $host1} ];
+        if ( $h eq $host ) {
+          if ( $host eq $host1 ) {
+            return "1 $h resolves to $ip and $ip resolves to $host but $host resolves to $host1";
+          } else {
+            return "2 $h resolves to $ip and $ip resolves to $host but $host resolves to $host1";
+          }
+        } else {
+          if ( $host eq $host1 ) {
+            return "3 $h resolves to $ip and $ip resolves to $host but $host resolves to $host1";
+          } else {
+            return "4 $h resolves to $ip and $ip resolves to $host but $host resolves to $host1";
+          }
+        }
+      } else {
+        $lookup{$ip} = '';
+        #warn "???\n";
+        return "$h resolves to $ip but $ip couldn't resolve";
+      }
+    }
+  }
+}
+
+get '/' => sub {
+  my $self = shift;
+} =>'index';
+
+#app->start;
