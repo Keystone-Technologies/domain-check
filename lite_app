@@ -1,4 +1,6 @@
 use Mojolicious::Lite;
+use Mojo::UserAgent;
+use Mojo::JSON 'j';
 
 use Net::Whois::Parser;
 use Net::SSL::ExpireDate;
@@ -7,22 +9,32 @@ use AnyEvent::DNS;
 use Data::Validate::IP;
 use Nmap::Parser;
 
+my $couchdb = "http://db.xlxcd1.kit.cm:5984/domain-check";
+my $ua = Mojo::UserAgent->new;
+
 my $validator=Data::Validate::IP->new;
+if ( 0 ) {
 my $np = new Nmap::Parser;
 #$np->parsescan('/usr/bin/nmap','-sV -p-',$ARGV[0]);
-$np->parsefile('nmap.xml');
+$np->parsefile('/var/mojo/domain-check/nmap.xml');
 for my $host ( $np->all_hosts ) {
   my $hostname = $host->hostname || $host->addr;
   say $hostname;
+  my $tx = $ua->get("$couchdb/$hostname");
+  my $json = $tx->res->json;
   # DNS
-  0 and lookup($hostname);
+  #warn lookup($hostname);
   # Domain expiration
-  if ( 0 && $host->hostname ) {
+  if ( $host->hostname ) {
     if ( my $info = parse_whois(domain => $host->hostname) ) {
       my $expires = DateTime::Format::Flexible->parse_datetime($info->{expiration_date});
       my $now = DateTime::Format::Flexible->parse_datetime('now');
       my $remaining = $now - $expires;
       printf "Domain Expires: %s%s\n", $expires->ymd, ($remaining->years + $remaining->months/12 < 3 ? " (< 3 months)" : '');
+      $json->{domain} = {
+        expires => $expires->ymd,
+        is_expiring => ($remaining->years + $remaining->months/12 < 3),
+      };
       #warn Data::Dumper::Dumper($info);
     }
   }
@@ -45,9 +57,15 @@ for my $host ( $np->all_hosts ) {
         if (defined $ed->expire_date) {
           printf "SSL on http port %s Expires: %s%s\n", $port, $ed->expire_date->ymd, ($ed->is_expired('3 months') ? " (< 3 months)" : '');
           #C=US, postalCode=63090, ST=MO, L=Washington, street=1000 Borgia Drive, O=St. Francis Borgia RHS, OU=Comodo InstantSSL, CN=www.borgia.com at lite_app line 47.
+          $json->{ssl}->{$port} = {
+            expires => $ed->expire_date->ymd,
+            is_expiring => $ed->is_expired('3 months'),
+          };
           foreach ( @{$ed->x509->subject_name->entries} ) {
             warn $_->type, $_->value;
+            $json->{ssl}->{$port}->{$_->type} = $_->value;
           }
+          $json->{ssl}->{$port}->{'2.5.29.17'} = $ed->x509->extensions_by_oid->{'2.5.29.17'}->value;
           warn $ed->x509->extensions_by_oid->{'2.5.29.17'}->value;
         }
       }
@@ -55,7 +73,9 @@ for my $host ( $np->all_hosts ) {
   }
   # Need to also store in database manual records: registrar + u/p, extra
   # name records, ssl supplier + u/p
+  say j($ua->put("$couchdb/$hostname" => json => $json)->res->json);
 } continue { print "\n" }
+}
 
 sub lookup {
   my %lookup;
@@ -136,6 +156,28 @@ sub lookup {
 
 get '/' => sub {
   my $self = shift;
-} =>'index';
+  my $docs = $self->ua->get("$couchdb/_all_docs")->res->json;
+  my @d;
+  foreach my $hostname ( map { $_->{id} } @{$docs->{rows}} ) {
+    push @d, {$hostname => $ua->get("$couchdb/$hostname")->res->json};
+  }
+  $self->stash(d => \@d);
+} =>'d';
 
-#app->start;
+app->start;
+
+__DATA__
+@@ d.html.ep
+<style>
+  .red	{color:red}
+</style>
+% foreach my $hostname ( @$d ) {
+  % my ($hostname, $json) = each %$hostname;
+  <%= $hostname %><br />
+  Domain expires: <span class="<%= $json->{domain}->{is_expiring} ? 'red' : '' %>"><%= $json->{domain}->{expires} %></span><br />
+  SSL:<br />
+  % foreach my $port ( keys %{$json->{ssl}} ) {
+    Port <%= $port %> expires: <span class="<%= $json->{ssl}->{$port}->{is_expiring} ? 'red' : '' %>"><%= $json->{ssl}->{$port}->{expires} %></span><br />
+  % }
+  <hr />
+% }
